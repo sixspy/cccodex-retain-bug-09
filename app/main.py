@@ -8,13 +8,17 @@ from itsdangerous import BadSignature, URLSafeSerializer
 from app.config import Config
 from app.db import get_db, init_db
 from app.services import (
+    binding_board,
     execute_judgment,
+    get_scan_job,
     list_judgments,
     list_partitions,
     list_policies,
     list_reports,
     list_runs,
     list_scan_jobs,
+    list_versions,
+    publish_version,
     run_expire_scan,
     run_reconcile,
 )
@@ -100,6 +104,7 @@ def api_meta(request: Request):
         "lab_name": Config.LAB_NAME,
         "lab_code": Config.LAB_CODE,
         "skeleton": "分区留存策略版本→到期扫描裁决→归档或销毁执行→策略与实物分区对账",
+        "version_rule": "裁决绑定开单快照；换版后旧单由到期扫描重扫作废/重开，执行不按新口径偷换",
     }
 
 
@@ -108,6 +113,36 @@ def api_policies(request: Request):
     require_user(request)
     with get_db() as conn:
         return {"items": list_policies(conn, active_only=True)}
+
+
+@app.get("/api/policy-versions")
+def api_policy_versions(request: Request):
+    require_user(request)
+    with get_db() as conn:
+        versions = list_versions(conn)
+        board = binding_board(conn)
+    return {"items": versions, "board": board}
+
+
+@app.post("/api/policies/publish")
+async def api_publish_policy(request: Request):
+    require_user(request)
+    body = await request.json()
+    domain_code = str(body.get("domain_code", "")).strip()
+    try:
+        keep_days = int(body.get("keep_days", 0))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="keep_days 必须为整数")
+    action = str(body.get("action_on_expire", "")).strip()
+    note = str(body.get("change_note", "")).strip()
+    if not domain_code:
+        raise HTTPException(status_code=400, detail="缺少 domain_code")
+    try:
+        with get_db() as conn:
+            result = publish_version(conn, domain_code, keep_days, action, note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"ok": True, **result}
 
 
 @app.get("/api/partitions")
@@ -124,6 +159,16 @@ def api_scan_jobs(request: Request):
         return {"items": list_scan_jobs(conn)}
 
 
+@app.get("/api/scan-jobs/{job_id}")
+def api_scan_job_detail(request: Request, job_id: int):
+    require_user(request)
+    with get_db() as conn:
+        job = get_scan_job(conn, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="扫描任务不存在")
+    return {"job": job}
+
+
 @app.post("/api/scan-jobs")
 async def api_create_scan(request: Request):
     require_user(request)
@@ -131,16 +176,23 @@ async def api_create_scan(request: Request):
     as_of = str(body.get("as_of_date", "")).strip()
     if not as_of:
         raise HTTPException(status_code=400, detail="缺少 as_of_date")
-    with get_db() as conn:
-        job = run_expire_scan(conn, as_of)
+    try:
+        with get_db() as conn:
+            job = run_expire_scan(conn, as_of)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": True, "job": job}
 
 
 @app.get("/api/judgments")
-def api_judgments(request: Request, status: str | None = None):
+def api_judgments(
+    request: Request,
+    status: str | None = None,
+    binding_state: str | None = None,
+):
     require_user(request)
     with get_db() as conn:
-        return {"items": list_judgments(conn, status=status)}
+        return {"items": list_judgments(conn, status=status, binding_state=binding_state)}
 
 
 @app.post("/api/judgments/{judgment_id}/execute")

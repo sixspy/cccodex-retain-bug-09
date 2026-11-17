@@ -2,7 +2,11 @@ import sqlite3
 
 
 def run_reconcile(conn: sqlite3.Connection, as_of_date: str) -> dict:
-    """策略视角与实物分区对账：统计各存储态，并找出「有完成裁决但状态不符」的错位。"""
+    """策略视角与实物分区对账：统计各存储态，并找出「有完成裁决但状态不符」的错位。
+
+    额外核对「绑定版 vs 在用版」：仍开放的裁决若绑定版本落后于在用版，
+    计为待重扫口径，不并入实物错位（实物尚未被改写）。
+    """
     counts = {
         r["storage_state"]: r["c"]
         for r in conn.execute(
@@ -30,9 +34,21 @@ def run_reconcile(conn: sqlite3.Connection, as_of_date: str) -> dict:
         """
     ).fetchall()
     mismatch_count = len(mismatches)
+
+    stale_open = conn.execute(
+        """
+        SELECT COUNT(*) AS c
+        FROM judgments j
+        JOIN retain_policies live
+          ON live.domain_code = j.domain_code AND live.active = 1
+        WHERE j.status IN ('待执行','执行中')
+          AND j.policy_version != live.version
+        """
+    ).fetchone()["c"]
+
     summary = (
         f"在线{online} / 已归档{archived} / 已销毁{destroyed} / "
-        f"待执行裁决{pending} / 错位{mismatch_count}"
+        f"待执行裁决{pending} / 错位{mismatch_count} / 待重扫{stale_open}"
     )
     cur = conn.execute(
         "INSERT INTO reconcile_reports "
@@ -58,6 +74,7 @@ def run_reconcile(conn: sqlite3.Connection, as_of_date: str) -> dict:
     ).fetchone()
     report = dict(row)
     report["mismatches"] = [dict(m) for m in mismatches]
+    report["stale_open"] = int(stale_open)
     return report
 
 

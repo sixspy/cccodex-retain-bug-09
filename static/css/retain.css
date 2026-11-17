@@ -182,3 +182,32 @@ th { color: var(--muted); font-weight: 550; }
   .nav { border-right: 0; border-bottom: 1px solid var(--line); display: flex; gap: 6px; overflow-x: auto; }
   .nav button { width: auto; white-space: nowrap; }
 }
+
+/* 版本绑定核对：绑定版与在用版分列，附注用微行 */
+select {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: #18202c;
+  color: var(--ink);
+  font: inherit;
+}
+.micro {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+  margin-top: 2px;
+}
+.note { max-width: 280px; color: var(--muted); font-size: 12px; }
+.okline { color: var(--ok); font-size: 13px; margin: 10px 0 0; }
+.warnline {
+  color: var(--warn);
+  font-size: 13px;
+  border-left: 3px solid var(--warn);
+  padding: 6px 10px;
+  margin: 0 0 12px;
+  background: rgba(201, 161, 74, 0.08);
+}
+button[disabled] { opacity: 0.55; cursor: not-allowed; }
